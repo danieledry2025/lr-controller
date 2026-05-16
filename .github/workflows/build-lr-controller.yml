@@ -1,0 +1,126 @@
+name: Build LR Controller macOS
+
+on:
+  push:
+    tags:
+      - 'lr-v*'
+      - 'lr-controller-v*'
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. lr-controller-v5.2.0)'
+        required: true
+        default: 'lr-controller-v5.2.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15   # Apple Silicon runner, Xcode 16
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Debug info
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "ref_type=${{ github.ref_type }}"
+          echo "ref_name=${{ github.ref_name }}"
+          sw_vers
+          swift --version
+
+      - name: Resolve version tag
+        id: version
+        env:
+          DISPATCH_VER: ${{ github.event.inputs.version || '' }}
+        run: |
+          if [ -n "$DISPATCH_VER" ]; then
+            echo "tag=$DISPATCH_VER" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            VER=$(grep '"version"' bluetooth-midi-app/package.json | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+            echo "tag=lr-controller-v${VER}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Compile Swift helper
+        working-directory: bluetooth-midi-app
+        run: |
+          swiftc helper/lr-helper.swift \
+            -o helper/lr-helper \
+            -framework IOKit \
+            -framework CoreGraphics
+          chmod +x helper/lr-helper
+          codesign --force --deep --sign - helper/lr-helper
+
+      - name: Install dependencies
+        working-directory: bluetooth-midi-app
+        run: npm install
+
+      - name: Build app bundle (dir only — sign before DMG)
+        working-directory: bluetooth-midi-app
+        run: npx electron-builder --mac dir --arm64
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Ad-hoc sign app bundle
+        working-directory: bluetooth-midi-app
+        run: codesign --force --deep --sign - "dist/mac-arm64/LR Controller.app"
+
+      - name: Package signed bundle into DMG with Applications symlink
+        working-directory: bluetooth-midi-app
+        run: |
+          VER=$(grep '"version"' package.json | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+          mkdir -p dist/dmg-staging
+          cp -r "dist/mac-arm64/LR Controller.app" dist/dmg-staging/
+          ln -s /Applications dist/dmg-staging/Applications
+          hdiutil create \
+            -volname "LR Controller" \
+            -srcfolder dist/dmg-staging \
+            -ov -format UDZO \
+            "dist/LR Controller-${VER}-arm64.dmg"
+          rm -rf dist/dmg-staging
+
+      - name: Find .dmg
+        id: find_dmg
+        working-directory: bluetooth-midi-app
+        run: |
+          DMG=$(ls dist/*.dmg | head -1)
+          echo "path=$DMG" >> $GITHUB_OUTPUT
+
+      - name: Create Release and upload .dmg
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "LR Controller ${{ steps.version.outputs.tag }}"
+          body: |
+            ## LR Controller v5.2 — בחירת מקלדת עובדת
+
+            ### תיקונים בגרסה זו
+            - ✅ **בחירת מקלדת עובדת** — גישה להתקן HID רצה כעת ישירות בתוך האפליקציה (node-hid),
+              ללא subprocess נפרד שדורש הרשאות משלו. אין יותר שגיאות "could not open device"!
+            - ✅ **מקשי XP-Pen לא מפריעים ללייטרום** — מצב גלובלי משתמש ב-CGEventTap אקטיבי
+            - ✅ **שגיאה בסיום הקלטת מקרו** — תוקנה
+            - ✅ **מקרו לוחץ במקומות לא נכונים** — לחיצת "עצור הקלטה" לא נרשמת כצעד
+
+            ### התקנה
+            1. הורד `arm64.dmg` → פתח → גרור LR Controller ל-Applications
+            2. לחץ ימני → **Open** (בפעם הראשונה)
+
+            ### הגדרה
+            1. System Settings → Privacy → **Accessibility** → הוסף LR Controller
+            2. System Settings → Privacy → **Input Monitoring** → הוסף LR Controller
+            3. פתח האפליקציה → בחר מקלדת מהרשימה או לחץ **"מצב גלובלי"**
+          draft: false
+          prerelease: false
+          files: bluetooth-midi-app/${{ steps.find_dmg.outputs.path }}

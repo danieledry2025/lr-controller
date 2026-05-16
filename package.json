@@ -1,0 +1,30 @@
+{
+  "name": "lr-controller",
+  "version": "5.2.0",
+  "description": "שלוט בלייטרום ממקלדת Bluetooth — ללא MIDI",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac dmg --arm64"
+  },
+  "build": {
+    "appId": "com.lrctrl.bluetooth-keyboard",
+    "productName": "LR Controller",
+    "mac": {
+      "category": "public.app-category.music",
+      "target": [{ "target": "dmg", "arch": ["arm64"] }]
+    },
+    "asarUnpack": ["**/*.node"],
+    "extraResources": [
+      { "from": "helper/lr-helper", "to": "lr-helper" }
+    ]
+  },
+  "dependencies": {
+    "node-hid": "^3.1.0",
+    "uiohook-napi": "^1.5.4"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  }
+}
