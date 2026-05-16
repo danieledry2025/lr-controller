@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, screen } = require('electron');
 const { execFile, spawn } = require('child_process');
 const path = require('path');
 
@@ -264,13 +264,17 @@ function startGlobalCapture() {
 
     uiohook.on('mousedown', (e) => {
       if (!recording || !win) return;
-      // Filter out clicks on LR Controller's own window — prevents Stop button
-      // from being recorded as a macro click step
+      // uiohook reports physical pixels on Retina; getBounds() returns logical points.
+      // Divide by scale factor to compare in the same coordinate space.
+      const sf = screen.getPrimaryDisplay().scaleFactor || 1;
       const b = win.getBounds();
-      if (e.x >= b.x && e.x < b.x + b.width &&
-          e.y >= b.y && e.y < b.y + b.height) return;
-      recordClickStep(e.x, e.y);
-      win.webContents.send('recorded-step', { type: 'click', x: e.x, y: e.y });
+      if (e.x >= b.x * sf && e.x < (b.x + b.width) * sf &&
+          e.y >= b.y * sf && e.y < (b.y + b.height) * sf) return;
+      // Store logical coordinates so playback works with CGEvent (which uses logical points)
+      const lx = Math.round(e.x / sf);
+      const ly = Math.round(e.y / sf);
+      recordClickStep(lx, ly);
+      win.webContents.send('recorded-step', { type: 'click', x: lx, y: ly });
     });
 
     uiohook.start();
@@ -490,8 +494,11 @@ ipcMain.handle('list-devices', () => {
   }
 });
 
-ipcMain.handle('start-device-capture', (_, { vendorId, productId }) =>
-  startDeviceCapture(vendorId, productId));
+ipcMain.handle('start-device-capture', (_, { vendorId, productId }) => {
+  const r = startDeviceCapture(vendorId, productId);
+  if (!r.ok && win) win.webContents.send('capture-status', { ok: false, error: r.error });
+  return r;
+});
 
 // Global mode uses tap capture (active — keys consumed for mapped, re-injected otherwise)
 ipcMain.handle('start-global-capture', () => {

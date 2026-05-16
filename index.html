@@ -423,13 +423,16 @@ async function refreshDevices() {
 let captureSeized = false;
 
 async function selectDevice(vid, pid, name) {
+  setBadge('cap', 'warn', `מתחבר: ${name}...`);
   const r = await window.lrCtrl.startDeviceCapture(vid, pid);
   if (r && r.ok) {
     captureMode = 'device';
     deviceVid = vid;
     devicePid = pid;
-    setBadge('cap', 'warn', `מחבר: ${name}...`);
     refreshDevices();
+  } else {
+    const msg = (r && r.error) || 'לא ניתן לפתוח מכשיר';
+    setBadge('cap', 'err', `שגיאה: ${msg}`);
   }
 }
 
