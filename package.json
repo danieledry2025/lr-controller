@@ -4,6 +4,7 @@
   "description": "שלוט בלייטרום ממקלדת Bluetooth — ללא MIDI",
   "main": "main.js",
   "scripts": {
+    "postinstall": "electron-rebuild && swiftc -O -o helper/lr-helper helper/lr-helper.swift",
     "start": "electron .",
     "dist": "electron-builder --mac dmg --arm64"
   },
